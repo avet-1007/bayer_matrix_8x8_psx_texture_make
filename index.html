@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PSX Texture Studio - Bayer 8x8 Dither & Converter</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        psx: {
+                            bg: '#121216',
+                            panel: '#1e1e24',
+                            border: '#333340',
+                            accent: '#6366f1',
+                            accentHover: '#4f46e5',
+                            text: '#e2e8f0'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen flex flex-col justify-between overflow-x-hidden">
+
+    <!-- Header -->
+    <header class="bg-psx-panel border-b border-psx-border px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center space-x-3">
+            <i class="fa-solid fa-gamepad text-indigo-400 text-2xl"></i>
+            <div>
+                <h1 class="text-xl font-bold tracking-wide text-white flex items-center gap-2">
+                    PSX Texture Studio <span class="text-xs font-mono bg-indigo-900/60 text-indigo-300 px-2 py-0.5 rounded border border-indigo-700">8x8 Bayer</span>
+                </h1>
+                <p id="i18n-subtitle" class="text-xs text-gray-400">Convert images to PS1 era textures with pixel precision</p>
+            </div>
+        </div>
+
+        <!-- Header Actions: Language Switcher & Reset -->
+        <div class="flex items-center space-x-3">
+            <!-- Language Selector -->
+            <div class="flex items-center gap-1.5 bg-gray-900 border border-gray-700 px-2.5 py-1 rounded-lg text-xs">
+                <i class="fa-solid fa-globe text-indigo-400"></i>
+                <select id="languageSelect" class="bg-transparent text-gray-200 focus:outline-none cursor-pointer">
+                    <option value="en" selected>English</option>
+                    <option value="ru">Русский</option>
+                </select>
+            </div>
+
+            <button id="resetBtn" class="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded border border-gray-700 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-rotate-left"></i> <span id="i18n-reset">Reset</span>
+            </button>
+            <button id="headerDownloadBtn" disabled class="px-4 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded shadow transition flex items-center gap-1.5">
+                <i class="fa-solid fa-download"></i> <span id="i18n-downloadHeader">Download PNG</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Workspace Layout -->
+    <main class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-w-[1800px] w-full mx-auto">
+        
+        <!-- Left Sidebar: Controls Panel -->
+        <aside class="lg:col-span-4 xl:col-span-3 bg-psx-panel border border-psx-border rounded-xl p-5 flex flex-col gap-5 h-fit max-h-[calc(100vh-100px)] overflow-y-auto">
+            
+            <!-- File Drop Area -->
+            <div>
+                <label id="i18n-lblSource" class="block text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Source File</label>
+                <div id="dropZone" class="border-2 border-dashed border-psx-border hover:border-indigo-500 transition rounded-xl p-4 text-center cursor-pointer bg-psx-bg/50 group">
+                    <input type="file" id="fileInput" accept="image/*" class="hidden">
+                    <i class="fa-solid fa-cloud-arrow-up text-3xl text-gray-500 group-hover:text-indigo-400 transition mb-2"></i>
+                    <p id="i18n-dropText" class="text-sm text-gray-300 font-medium">Drag & drop photo or <span class="text-indigo-400 underline">browse</span></p>
+                    <p class="text-xs text-gray-500 mt-1">PNG, JPG, WebP, GIF</p>
+                </div>
+            </div>
+
+            <hr class="border-psx-border">
+
+            <!-- Dimension Controls -->
+            <div class="space-y-3">
+                <div class="flex justify-between items-center">
+                    <label id="i18n-lblResolution" class="text-xs font-bold uppercase tracking-wider text-gray-400">Resolution (Pixels)</label>
+                    <button id="lockAspectBtn" class="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                        <i id="lockIcon" class="fa-solid fa-lock-open text-gray-500"></i> <span id="i18n-aspectRatio">Aspect Ratio</span>
+                    </button>
+                </div>
+
+                <!-- Quick Presets -->
+                <div class="grid grid-cols-4 gap-1.5 text-xs">
+                    <button class="preset-btn bg-gray-800 hover:bg-gray-700 py-1 rounded border border-gray-700" data-w="64" data-h="64">64x64</button>
+                    <button class="preset-btn bg-gray-800 hover:bg-gray-700 py-1 rounded border border-gray-700" data-w="128" data-h="128">128x128</button>
+                    <button class="preset-btn bg-gray-800 hover:bg-gray-700 py-1 rounded border border-gray-700" data-w="256" data-h="256">256x256</button>
+                    <button class="preset-btn bg-gray-800 hover:bg-gray-700 py-1 rounded border border-gray-700" data-w="320" data-h="240">320x240</button>
+                </div>
+
+                <!-- Width Control -->
+                <div class="bg-psx-bg p-2.5 rounded-lg border border-psx-border">
+                    <div class="flex justify-between items-center mb-1 text-xs text-gray-300">
+                        <span id="i18n-width">Width</span>
+                        <span id="widthVal" class="font-mono text-indigo-400">128px</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <button id="wSub10" class="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-xs rounded border border-gray-700">-10</button>
+                        <button id="wSub1" class="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-xs rounded border border-gray-700">-1</button>
+                        <input type="number" id="targetWidth" value="128" min="1" max="2048" class="w-full bg-gray-900 border border-gray-700 text-center text-xs py-1 rounded text-white font-mono focus:outline-none focus:border-indigo-500">
+                        <button id="wAdd1" class="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-xs rounded border border-gray-700">+1</button>
+                        <button id="wAdd10" class="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-xs rounded border border-gray-700">+10</button>
+                    </div>
+                </div>
+
+                <!-- Height Control -->
+                <div class="bg-psx-bg p-2.5 rounded-lg border border-psx-border">
+                    <div class="flex justify-between items-center mb-1 text-xs text-gray-300">
+                        <span id="i18n-height">Height</span>
+                        <span id="heightVal" class="font-mono text-indigo-400">128px</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <button id="hSub10" class="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-xs rounded border border-gray-700">-10</button>
+                        <button id="hSub1" class="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-xs rounded border border-gray-700">-1</button>
+                        <input type="number" id="targetHeight" value="128" min="1" max="2048" class="w-full bg-gray-900 border border-gray-700 text-center text-xs py-1 rounded text-white font-mono focus:outline-none focus:border-indigo-500">
+                        <button id="hAdd1" class="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-xs rounded border border-gray-700">+1</button>
+                        <button id="hAdd10" class="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-xs rounded border border-gray-700">+10</button>
+                    </div>
+                </div>
+
+                <!-- Fit Mode -->
+                <div class="flex items-center justify-between text-xs pt-1">
+                    <span id="i18n-fitMode" class="text-gray-400">Fit Mode:</span>
+                    <select id="fitMode" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none">
+                        <option value="stretch" id="i18n-fitStretch">Stretch</option>
+                        <option value="contain" id="i18n-fitContain">Contain</option>
+                        <option value="cover" selected id="i18n-fitCover">Cover / Crop</option>
+                    </select>
+                </div>
+            </div>
+
+            <hr class="border-psx-border">
+
+            <!-- PSX Effect & Bayer Dither Settings -->
+            <div class="space-y-4">
+                <label id="i18n-lblBayer" class="block text-xs font-bold uppercase tracking-wider text-gray-400">Bayer & PSX Settings</label>
+
+                <!-- Dithering Amount -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span id="i18n-ditherStrength" class="text-gray-300">8x8 Dither Strength</span>
+                        <span id="ditherAmountVal" class="font-mono text-indigo-400">0.80</span>
+                    </div>
+                    <input type="range" id="ditherAmount" min="0" max="1" step="0.05" value="0.8" class="w-full h-1.5 bg-gray-800 rounded-lg cursor-pointer">
+                </div>
+
+                <!-- Color Depth (Levels per channel) -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span id="i18n-colorDepth" class="text-gray-300">Color Depth (Levels/Channel)</span>
+                        <span id="colorLevelsVal" class="font-mono text-indigo-400">8 (15-bit PSX)</span>
+                    </div>
+                    <input type="range" id="colorLevels" min="2" max="32" step="1" value="8" class="w-full h-1.5 bg-gray-800 rounded-lg cursor-pointer">
+                    <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+                        <span>2 (1-bit)</span>
+                        <span>8 (PS1 HW)</span>
+                        <span>32 (High)</span>
+                    </div>
+                </div>
+
+                <!-- Palette Type -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span id="i18n-paletteMode" class="text-gray-300">Palette Mode</span>
+                    </div>
+                    <select id="paletteMode" class="w-full bg-gray-900 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none">
+                        <option value="rgb" id="i18n-palRGB">Per-Channel RGB Quantization</option>
+                        <option value="grayscale" id="i18n-palGray">Grayscale (Monochrome PSX)</option>
+                        <option value="gameboy" id="i18n-palGB">Retro GameBoy (4 Tones)</option>
+                    </select>
+                </div>
+            </div>
+
+            <hr class="border-psx-border">
+
+            <!-- Shading & Lighting Controls -->
+            <div class="space-y-4">
+                <label id="i18n-lblShading" class="block text-xs font-bold uppercase tracking-wider text-gray-400">Shading & Color Corrections</label>
+
+                <!-- Brightness -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span id="i18n-brightness" class="text-gray-300">Brightness</span>
+                        <span id="brightnessVal" class="font-mono text-indigo-400">0</span>
+                    </div>
+                    <input type="range" id="brightness" min="-100" max="100" step="1" value="0" class="w-full h-1.5 bg-gray-800 rounded-lg cursor-pointer">
+                </div>
+
+                <!-- Contrast -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span id="i18n-contrast" class="text-gray-300">Contrast</span>
+                        <span id="contrastVal" class="font-mono text-indigo-400">0</span>
+                    </div>
+                    <input type="range" id="contrast" min="-100" max="100" step="1" value="0" class="w-full h-1.5 bg-gray-800 rounded-lg cursor-pointer">
+                </div>
+
+                <!-- Saturation -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span id="i18n-saturation" class="text-gray-300">Saturation</span>
+                        <span id="saturationVal" class="font-mono text-indigo-400">0</span>
+                    </div>
+                    <input type="range" id="saturation" min="-100" max="100" step="1" value="0" class="w-full h-1.5 bg-gray-800 rounded-lg cursor-pointer">
+                </div>
+            </div>
+        </aside>
+
+        <!-- Right Content Area: Interactive Canvas Preview & Controls -->
+        <section class="lg:col-span-8 xl:col-span-9 bg-psx-panel border border-psx-border rounded-xl p-6 flex flex-col justify-between items-center relative min-h-[500px]">
+            
+            <!-- Top Toolbar for Preview Canvas -->
+            <div class="w-full flex flex-wrap items-center justify-between border-b border-psx-border pb-4 mb-4 gap-3 text-xs text-gray-400">
+                <div class="flex items-center gap-4">
+                    <span class="flex items-center gap-1.5 text-gray-200 font-medium">
+                        <i class="fa-solid fa-eye text-indigo-400"></i> <span id="i18n-previewTitle">Live Preview</span>
+                    </span>
+                    <span id="renderTime" class="font-mono text-gray-500">Render time: 0ms</span>
+                </div>
+                
+                <div class="flex items-center gap-4">
+                    <!-- Zoom preview size -->
+                    <div class="flex items-center gap-2">
+                        <span id="i18n-zoom">Zoom:</span>
+                        <select id="previewScale" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200">
+                            <option value="1">100%</option>
+                            <option value="2">200%</option>
+                            <option value="3" selected>300%</option>
+                            <option value="4">400%</option>
+                            <option value="fit" id="i18n-zoomFit">Auto Fit</option>
+                        </select>
+                    </div>
+
+                    <!-- PROMINENT DIRECT DOWNLOAD BUTTON ON THE PREVIEW TOOLBAR -->
+                    <button id="toolbarDownloadBtn" disabled class="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg shadow-lg hover:shadow-emerald-900/30 transition flex items-center gap-2">
+                        <i class="fa-solid fa-download text-sm"></i>
+                        <span id="i18n-downloadToolbar">Export Texture</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Canvas Viewport Area -->
+            <div id="canvasViewport" class="flex-1 w-full flex items-center justify-center overflow-auto min-h-[350px] p-4 bg-psx-bg/40 rounded-xl border border-psx-border relative">
+                <!-- Fallback message before file load -->
+                <div id="placeholderText" class="text-center text-gray-500 space-y-3">
+                    <i class="fa-regular fa-image text-5xl text-gray-600"></i>
+                    <p id="i18n-placeholder" class="text-sm">Upload or drag & drop an image to start converting</p>
+                </div>
+                
+                <!-- Main Processing Canvas -->
+                <canvas id="outputCanvas" class="hidden rounded border border-gray-700 transition-transform duration-75"></canvas>
+            </div>
+
+            <!-- Canvas Status Footer -->
+            <div class="w-full flex justify-between items-center pt-4 mt-4 border-t border-psx-border text-xs text-gray-400">
+                <div id="imageDimensionsInfo" class="font-mono">
+                    Source: -
+                </div>
+                <div id="outputDimensionsInfo" class="font-mono text-indigo-400 font-semibold">
+                    Output: -
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-psx-panel border-t border-psx-border px-6 py-3 text-center text-xs text-gray-500">
+        PSX Texture Studio &copy; 2026 — 8x8 Ordered Dithering Canvas Pipeline
+    </footer>
+
+    <!-- Main JS Application Logic -->
+    <script src="script.js"></script>
+</body>
+</html>
