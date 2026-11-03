@@ -1,631 +1,634 @@
 
-(() => {
-    "use strict";
+"use strict";
 
-    const $ = (id) => document.getElementById(id);
+/* =========================================================
+   PSX Texture Studio
+   Bayer 8x8 image converter
+   ========================================================= */
 
-    const elements = {
-        dropZone: $("dropZone"),
-        fileInput: $("fileInput"),
-        languageSelect: $("languageSelect"),
-        resetBtn: $("resetBtn"),
-        headerDownloadBtn: $("headerDownloadBtn"),
-        toolbarDownloadBtn: $("toolbarDownloadBtn"),
-        targetWidth: $("targetWidth"),
-        targetHeight: $("targetHeight"),
-        widthVal: $("widthVal"),
-        heightVal: $("heightVal"),
-        fitMode: $("fitMode"),
-        ditherAmount: $("ditherAmount"),
-        ditherAmountVal: $("ditherAmountVal"),
-        colorLevels: $("colorLevels"),
-        colorLevelsVal: $("colorLevelsVal"),
-        paletteMode: $("paletteMode"),
-        brightness: $("brightness"),
-        brightnessVal: $("brightnessVal"),
-        contrast: $("contrast"),
-        contrastVal: $("contrastVal"),
-        saturation: $("saturation"),
-        saturationVal: $("saturationVal"),
-        previewScale: $("previewScale"),
-        lockAspectBtn: $("lockAspectBtn"),
-        lockIcon: $("lockIcon"),
-        aspectRatioText: $("i18n-aspectRatio"),
-        outputCanvas: $("outputCanvas"),
-        placeholderText: $("placeholderText"),
-        renderTime: $("renderTime"),
-        imageDimensionsInfo: $("imageDimensionsInfo"),
-        outputDimensionsInfo: $("outputDimensionsInfo")
-    };
+const BAYER_8X8 = [
+    [0, 32, 8, 40, 2, 34, 10, 42],
+    [48, 16, 56, 24, 50, 18, 58, 26],
+    [12, 44, 4, 36, 14, 46, 6, 38],
+    [60, 28, 52, 20, 62, 30, 54, 22],
+    [3, 35, 11, 43, 1, 33, 9, 41],
+    [51, 19, 59, 27, 49, 17, 57, 25],
+    [15, 47, 7, 39, 13, 45, 5, 37],
+    [63, 31, 55, 23, 61, 29, 53, 21]
+];
 
-    const requiredIds = [
-        "dropZone",
-        "fileInput",
-        "languageSelect",
-        "targetWidth",
-        "targetHeight",
-        "outputCanvas",
-        "toolbarDownloadBtn",
-        "headerDownloadBtn"
-    ];
+const $ = id => document.getElementById(id);
 
-    const missing = requiredIds.filter((id) => !$(id));
+const el = {
+    dropZone: $("dropZone"),
+    fileInput: $("fileInput"),
 
-    if (missing.length) {
-        console.error(
-            "Missing HTML elements:",
-            missing
-        );
+    width: $("targetWidth"),
+    height: $("targetHeight"),
+    widthVal: $("widthVal"),
+    heightVal: $("heightVal"),
+
+    fitMode: $("fitMode"),
+    lockAspect: $("lockAspectBtn"),
+    lockIcon: $("lockIcon"),
+
+    dither: $("ditherAmount"),
+    ditherVal: $("ditherAmountVal"),
+
+    colorLevels: $("colorLevels"),
+    colorLevelsVal: $("colorLevelsVal"),
+
+    palette: $("paletteMode"),
+
+    brightness: $("brightness"),
+    brightnessVal: $("brightnessVal"),
+
+    contrast: $("contrast"),
+    contrastVal: $("contrastVal"),
+
+    saturation: $("saturation"),
+    saturationVal: $("saturationVal"),
+
+    language: $("languageSelect"),
+    reset: $("resetBtn"),
+
+    preview: $("outputCanvas"),
+    viewport: $("canvasViewport"),
+    placeholder: $("placeholderText"),
+
+    previewScale: $("previewScale"),
+    renderTime: $("renderTime"),
+
+    sourceInfo: $("imageDimensionsInfo"),
+    outputInfo: $("outputDimensionsInfo"),
+
+    downloadHeader: $("headerDownloadBtn"),
+    downloadToolbar: $("toolbarDownloadBtn")
+};
+
+const ctx = el.preview.getContext("2d", {
+    willReadFrequently: true
+});
+
+let sourceImage = null;
+let sourceWidth = 0;
+let sourceHeight = 0;
+let sourceName = "image";
+
+let aspectLocked = false;
+let isRendering = false;
+
+let currentObjectURL = null;
+let renderRequest = 0;
+
+/* =========================================================
+   TRANSLATIONS
+   ========================================================= */
+
+const translations = {
+    en: {
+        source: "Source File",
+        drop: "Drag & drop photo or browse",
+        resolution: "Resolution (Pixels)",
+        aspect: "Aspect Ratio",
+        bayer: "Bayer & PSX Settings",
+        shading: "Shading & Color Corrections",
+        brightness: "Brightness",
+        contrast: "Contrast",
+        saturation: "Saturation",
+        preview: "Live Preview",
+        placeholder: "Upload or drag & drop an image to start converting",
+        reset: "Reset",
+        download: "Download PNG",
+        fit: "Fit Mode:",
+        dither: "8x8 Dither Strength",
+        depth: "Color Depth (Levels/Channel)",
+        palette: "Palette Mode",
+        zoom: "Zoom:",
+        locked: "Aspect ratio locked",
+        unlocked: "Aspect ratio unlocked",
+        loading: "Loading image...",
+        loaded: "Image loaded",
+        readError: "The image could not be read. Try another image format.",
+        unsupported: "Please select a valid image file.",
+        sourceLabel: "Source:",
+        outputLabel: "Output:"
+    },
+
+    ru: {
+        source: "Исходное изображение",
+        drop: "Перетащите изображение или выберите файл",
+        resolution: "Разрешение (пиксели)",
+        aspect: "Соотношение сторон",
+        bayer: "Настройки Bayer и PSX",
+        shading: "Освещение и коррекция цвета",
+        brightness: "Яркость",
+        contrast: "Контраст",
+        saturation: "Насыщенность",
+        preview: "Предпросмотр",
+        placeholder: "Загрузите изображение или перетащите его сюда",
+        reset: "Сбросить",
+        download: "Скачать PNG",
+        fit: "Режим масштабирования:",
+        dither: "Интенсивность дизеринга 8×8",
+        depth: "Глубина цвета (уровней на канал)",
+        palette: "Цветовая палитра",
+        zoom: "Масштаб:",
+        locked: "Пропорции заблокированы",
+        unlocked: "Пропорции разблокированы",
+        loading: "Загрузка изображения...",
+        loaded: "Изображение загружено",
+        readError: "Не удалось прочитать изображение. Попробуйте другой формат.",
+        unsupported: "Выберите корректный файл изображения.",
+        sourceLabel: "Исходное:",
+        outputLabel: "Результат:"
+    }
+};
+
+function tr(key) {
+    const lang = el.language.value || "en";
+    return translations[lang]?.[key] || translations.en[key] || key;
+}
+
+function applyLanguage() {
+    const ru = el.language.value === "ru";
+
+    $("i18n-lblSource").textContent = ru ? "Исходный файл" : "Source File";
+    $("i18n-lblResolution").textContent = ru ? "Разрешение (пиксели)" : "Resolution (Pixels)";
+    $("i18n-lblBayer").textContent = ru ? "Настройки Bayer и PSX" : "Bayer & PSX Settings";
+    $("i18n-lblShading").textContent = ru ? "Освещение и коррекция цвета" : "Shading & Color Corrections";
+
+    $("i18n-width").textContent = ru ? "Ширина" : "Width";
+    $("i18n-height").textContent = ru ? "Высота" : "Height";
+
+    $("i18n-aspectRatio").textContent = tr("aspect");
+    $("i18n-fitMode").textContent = tr("fit");
+    $("i18n-ditherStrength").textContent = tr("dither");
+    $("i18n-colorDepth").textContent = tr("depth");
+    $("i18n-paletteMode").textContent = tr("palette");
+
+    $("i18n-brightness").textContent = tr("brightness");
+    $("i18n-contrast").textContent = tr("contrast");
+    $("i18n-saturation").textContent = tr("saturation");
+
+    $("i18n-previewTitle").textContent = tr("preview");
+    $("i18n-zoom").textContent = tr("zoom");
+    $("i18n-placeholder").textContent = tr("placeholder");
+
+    $("i18n-reset").textContent = tr("reset");
+    $("i18n-downloadHeader").textContent = tr("download");
+    $("i18n-downloadToolbar").textContent = tr("download");
+
+    $("i18n-dropText").textContent = tr("drop");
+
+    updateAspectButton();
+}
+
+/* =========================================================
+   IMAGE LOADING
+   ========================================================= */
+
+function isImageFile(file) {
+    if (!file) return false;
+
+    if (file.type && file.type.startsWith("image/")) {
+        return true;
+    }
+
+    const name = (file.name || "").toLowerCase();
+
+    return /\.(png|jpe?g|gif|webp|bmp|svg|avif|tiff?)$/i.test(name);
+}
+
+function showLoading() {
+    if (el.placeholder) {
+        el.placeholder.classList.remove("hidden");
+        $("i18n-placeholder").textContent = tr("loading");
+    }
+}
+
+function showPlaceholder() {
+    el.preview.classList.add("hidden");
+
+    if (el.placeholder) {
+        el.placeholder.classList.remove("hidden");
+        $("i18n-placeholder").textContent = tr("placeholder");
+    }
+
+    el.downloadHeader.disabled = true;
+    el.downloadToolbar.disabled = true;
+}
+
+function showPreview() {
+    el.preview.classList.remove("hidden");
+
+    if (el.placeholder) {
+        el.placeholder.classList.add("hidden");
+    }
+
+    el.downloadHeader.disabled = false;
+    el.downloadToolbar.disabled = false;
+}
+
+/*
+ * All local image sources use this function:
+ * File Explorer, Drag & Drop and clipboard.
+ */
+async function handleFile(file) {
+    if (!file) return;
+
+    if (!isImageFile(file)) {
+        alert(tr("unsupported"));
         return;
     }
 
-    const ctx = elements.outputCanvas.getContext(
-        "2d",
-        { willReadFrequently: true }
+    showLoading();
+
+    try {
+        let decodedImage;
+
+        /*
+         * createImageBitmap is preferred because it reads
+         * local File/Blob objects directly.
+         */
+        if ("createImageBitmap" in window) {
+            try {
+                decodedImage = await createImageBitmap(file);
+            } catch (error) {
+                decodedImage = await loadWithImageElement(file);
+            }
+        } else {
+            decodedImage = await loadWithImageElement(file);
+        }
+
+        sourceImage = decodedImage;
+        sourceWidth = decodedImage.width;
+        sourceHeight = decodedImage.height;
+
+        sourceName = (file.name || "image")
+            .replace(/\.[^/.]+$/, "");
+
+        if (sourceWidth <= 0 || sourceHeight <= 0) {
+            throw new Error("Invalid image dimensions");
+        }
+
+        setInitialDimensions(sourceWidth, sourceHeight);
+
+        el.sourceInfo.textContent =
+            `${tr("sourceLabel")} ${sourceWidth} × ${sourceHeight}`;
+
+        showPreview();
+        renderImage();
+
+    } catch (error) {
+        console.error("Image loading error:", error);
+
+        showPlaceholder();
+        alert(tr("readError"));
+    }
+}
+
+/*
+ * Fallback for browsers that cannot decode with createImageBitmap.
+ */
+function loadWithImageElement(file) {
+    return new Promise((resolve, reject) => {
+        const objectURL = URL.createObjectURL(file);
+
+        const img = new Image();
+
+        img.onload = () => {
+            URL.revokeObjectURL(objectURL);
+            resolve(img);
+        };
+
+        img.onerror = () => {
+            URL.revokeObjectURL(objectURL);
+            reject(new Error("Image decoding failed"));
+        };
+
+        img.src = objectURL;
+    });
+}
+
+function setInitialDimensions(width, height) {
+    const maxDimension = 256;
+
+    let w = width;
+    let h = height;
+
+    if (w > maxDimension || h > maxDimension) {
+        const scale = maxDimension / Math.max(w, h);
+
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+    }
+
+    el.width.value = w;
+    el.height.value = h;
+
+    el.width.max = Math.max(2048, width * 2);
+    el.height.max = Math.max(2048, height * 2);
+
+    updateDimensionLabels();
+}
+
+/* =========================================================
+   FILE INPUT
+   ========================================================= */
+
+el.fileInput.addEventListener("change", async event => {
+    const file = event.target.files?.[0];
+
+    if (file) {
+        await handleFile(file);
+    }
+
+    // Allows selecting the same file again.
+    event.target.value = "";
+});
+
+/*
+ * Clicking anywhere inside the drop zone opens Windows Explorer.
+ */
+el.dropZone.addEventListener("click", event => {
+    if (event.target === el.fileInput) return;
+
+    el.fileInput.click();
+});
+
+/* =========================================================
+   DRAG & DROP
+   ========================================================= */
+
+function containsFiles(event) {
+    return Array.from(event.dataTransfer?.types || [])
+        .includes("Files");
+}
+
+function preventFileNavigation(event) {
+    if (containsFiles(event)) {
+        event.preventDefault();
+    }
+}
+
+window.addEventListener("dragover", preventFileNavigation);
+
+window.addEventListener("drop", event => {
+    if (!containsFiles(event)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const files = Array.from(event.dataTransfer.files || []);
+    const imageFile = files.find(isImageFile);
+
+    if (imageFile) {
+        handleFile(imageFile);
+    } else if (files.length) {
+        alert(tr("unsupported"));
+    }
+
+    el.dropZone.classList.remove("drag-active");
+});
+
+el.dropZone.addEventListener("dragenter", event => {
+    if (!containsFiles(event)) return;
+
+    event.preventDefault();
+    el.dropZone.classList.add("drag-active");
+});
+
+el.dropZone.addEventListener("dragover", event => {
+    if (!containsFiles(event)) return;
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    el.dropZone.classList.add("drag-active");
+});
+
+el.dropZone.addEventListener("dragleave", event => {
+    if (!el.dropZone.contains(event.relatedTarget)) {
+        el.dropZone.classList.remove("drag-active");
+    }
+});
+
+el.dropZone.addEventListener("drop", event => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    el.dropZone.classList.remove("drag-active");
+});
+
+/* =========================================================
+   CLIPBOARD
+   ========================================================= */
+
+window.addEventListener("paste", event => {
+    const clipboard = event.clipboardData;
+
+    if (!clipboard) return;
+
+    const items = Array.from(clipboard.items || []);
+
+    for (const item of items) {
+        if (item.kind !== "file") continue;
+
+        const file = item.getAsFile();
+
+        if (file && isImageFile(file)) {
+            event.preventDefault();
+            handleFile(file);
+            return;
+        }
+    }
+});
+
+/* =========================================================
+   IMAGE PROCESSING
+   ========================================================= */
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function fitImage(context, image, width, height, mode) {
+    const sw = image.width;
+    const sh = image.height;
+
+    if (mode === "stretch") {
+        context.drawImage(image, 0, 0, width, height);
+        return;
+    }
+
+    const scale = mode === "contain"
+        ? Math.min(width / sw, height / sh)
+        : Math.max(width / sw, height / sh);
+
+    const dw = sw * scale;
+    const dh = sh * scale;
+
+    const dx = (width - dw) / 2;
+    const dy = (height - dh) / 2;
+
+    context.drawImage(image, dx, dy, dw, dh);
+}
+
+function adjustColor(r, g, b) {
+    const brightness = Number(el.brightness.value);
+    const contrast = Number(el.contrast.value);
+    const saturation = Number(el.saturation.value);
+
+    r += brightness * 1.5;
+    g += brightness * 1.5;
+    b += brightness * 1.5;
+
+    const contrastFactor =
+        (259 * (contrast + 255)) /
+        (255 * (259 - contrast));
+
+    r = contrastFactor * (r - 128) + 128;
+    g = contrastFactor * (g - 128) + 128;
+    b = contrastFactor * (b - 128) + 128;
+
+    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    const saturationFactor = 1 + saturation / 100;
+
+    r = gray + (r - gray) * saturationFactor;
+    g = gray + (g - gray) * saturationFactor;
+    b = gray + (b - gray) * saturationFactor;
+
+    return [
+        clamp(r, 0, 255),
+        clamp(g, 0, 255),
+        clamp(b, 0, 255)
+    ];
+}
+
+function quantize(value, levels, threshold) {
+    const step = 255 / (levels - 1);
+
+    const adjusted = clamp(
+        value + threshold,
+        0,
+        255
     );
 
-    if (!ctx) {
-        console.error("Canvas 2D is not supported.");
-        return;
+    return clamp(
+        Math.round(Math.round(adjusted / step) * step),
+        0,
+        255
+    );
+}
+
+function applyPalette(r, g, b, x, y, levels, strength) {
+    const palette = el.palette.value;
+
+    const matrixValue = BAYER_8X8[y % 8][x % 8];
+
+    const threshold =
+        ((matrixValue + 0.5) / 64 - 0.5) *
+        255 / (levels - 1) *
+        strength;
+
+    if (palette === "grayscale") {
+        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+
+        const value = quantize(gray, levels, threshold);
+
+        return [value, value, value];
     }
 
-    const bayerMatrix8x8 = [
-        [0, 32, 8, 40, 2, 34, 10, 42],
-        [48, 16, 56, 24, 50, 18, 58, 26],
-        [12, 44, 4, 36, 14, 46, 6, 38],
-        [60, 28, 52, 20, 62, 30, 54, 22],
-        [3, 35, 11, 43, 1, 33, 9, 41],
-        [51, 19, 59, 27, 49, 17, 57, 25],
-        [15, 47, 7, 39, 13, 45, 5, 37],
-        [63, 31, 55, 23, 61, 29, 53, 21]
-    ];
+    if (palette === "gameboy") {
+        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
 
-    const defaults = {
-        width: 128,
-        height: 128,
-        fitMode: "cover",
-        ditherAmount: 0.8,
-        colorLevels: 8,
-        paletteMode: "rgb",
-        brightness: 0,
-        contrast: 0,
-        saturation: 0,
-        previewScale: "3"
-    };
-
-    let sourceImage = null;
-    let sourceName = "image";
-    let sourceAspect = 1;
-    let lockAspect = false;
-    let currentObjectUrl = null;
-    let renderQueued = false;
-
-    let currentLang =
-        elements.languageSelect.value || "en";
-
-    const translations = {
-        en: {
-            loaded: "Image loaded",
-            source: "Source",
-            output: "Output",
-            render: "Render time",
-            aspect: "Aspect Ratio",
-            drop: "Drop an image here or click to browse",
-            invalid: "Please choose a valid image file.",
-            readError: "The image could not be read.",
-            pasteHint: "Image pasted from clipboard"
-        },
-
-        ru: {
-            loaded: "Изображение загружено",
-            source: "Исходное",
-            output: "Результат",
-            render: "Время обработки",
-            aspect: "Пропорции",
-            drop: "Перетащите изображение сюда или нажмите для выбора",
-            invalid: "Выберите корректный файл изображения.",
-            readError: "Не удалось прочитать изображение.",
-            pasteHint: "Изображение вставлено из буфера обмена"
-        }
-    };
-
-    function t(key) {
-        return (
-            translations[currentLang]?.[key] ||
-            translations.en[key] ||
-            key
-        );
-    }
-
-    function clamp(value, min, max) {
-        return Math.min(max, Math.max(min, value));
-    }
-
-    function safeDimension(value, fallback) {
-        const number = Math.round(Number(value));
-
-        return Number.isFinite(number)
-            ? clamp(number, 1, 2048)
-            : fallback;
-    }
-
-    function updateDimensionLabels() {
-        if (elements.widthVal) {
-            elements.widthVal.textContent =
-                `${elements.targetWidth.value}px`;
-        }
-
-        if (elements.heightVal) {
-            elements.heightVal.textContent =
-                `${elements.targetHeight.value}px`;
-        }
-    }
-
-    function updateValueLabels() {
-        if (elements.ditherAmountVal) {
-            elements.ditherAmountVal.textContent =
-                Number(elements.ditherAmount.value).toFixed(2);
-        }
-
-        if (elements.colorLevelsVal) {
-            const levels = Number(elements.colorLevels.value);
-
-            elements.colorLevelsVal.textContent =
-                `${levels} (${levels === 8 ? "15-bit PSX" : "levels/channel"})`;
-        }
-
-        if (elements.brightnessVal) {
-            elements.brightnessVal.textContent =
-                elements.brightness.value;
-        }
-
-        if (elements.contrastVal) {
-            elements.contrastVal.textContent =
-                elements.contrast.value;
-        }
-
-        if (elements.saturationVal) {
-            elements.saturationVal.textContent =
-                elements.saturation.value;
-        }
-    }
-
-    function updateAspectButton() {
-        if (!elements.lockAspectBtn) return;
-
-        if (elements.lockIcon) {
-            elements.lockIcon.className = lockAspect
-                ? "fa-solid fa-lock text-indigo-400"
-                : "fa-solid fa-lock-open text-gray-500";
-        }
-
-        if (elements.aspectRatioText) {
-            elements.aspectRatioText.textContent = t("aspect");
-        }
-
-        elements.lockAspectBtn.setAttribute(
-            "aria-pressed",
-            String(lockAspect)
-        );
-    }
-
-    function updateCanvasScale() {
-        const canvas = elements.outputCanvas;
-
-        const scale = elements.previewScale
-            ? elements.previewScale.value
-            : "3";
-
-        canvas.style.width = "";
-        canvas.style.height = "";
-        canvas.style.maxWidth = "100%";
-        canvas.style.maxHeight = "100%";
-
-        if (scale === "fit") {
-            canvas.style.width = "auto";
-            canvas.style.height = "auto";
-            canvas.style.maxWidth = "100%";
-            canvas.style.maxHeight = "100%";
-        } else {
-            const multiplier = clamp(
-                Number(scale) || 3,
-                1,
-                4
-            );
-
-            canvas.style.width =
-                `${canvas.width * multiplier}px`;
-
-            canvas.style.height =
-                `${canvas.height * multiplier}px`;
-
-            canvas.style.maxWidth = "none";
-            canvas.style.maxHeight = "none";
-        }
-    }
-
-    function showLoadedImage() {
-        elements.outputCanvas.classList.remove("hidden");
-
-        if (elements.placeholderText) {
-            elements.placeholderText.classList.add("hidden");
-        }
-
-        elements.headerDownloadBtn.disabled = false;
-        elements.toolbarDownloadBtn.disabled = false;
-    }
-
-    function showEmptyState() {
-        elements.outputCanvas.classList.add("hidden");
-
-        if (elements.placeholderText) {
-            elements.placeholderText.classList.remove("hidden");
-        }
-
-        elements.headerDownloadBtn.disabled = true;
-        elements.toolbarDownloadBtn.disabled = true;
-    }
-
-    function setStatus(message) {
-        const node = $("i18n-placeholder");
-
-        if (node && !sourceImage) {
-            node.textContent = message;
-        }
-    }
-
-    // Main image loading function.
-    function loadImageFromBlob(blob, name) {
-        if (
-            !(blob instanceof Blob) ||
-            !blob.type.startsWith("image/")
-        ) {
-            alert(t("invalid"));
-            return;
-        }
-
-        const imageUrl = URL.createObjectURL(blob);
-        const image = new Image();
-
-        image.onload = () => {
-            if (currentObjectUrl) {
-                URL.revokeObjectURL(currentObjectUrl);
-            }
-
-            currentObjectUrl = imageUrl;
-
-            sourceImage = image;
-
-            sourceName =
-                (name || "image").replace(/\.[^.]+$/, "") ||
-                "image";
-
-            sourceAspect =
-                image.naturalWidth / image.naturalHeight;
-
-            let width = image.naturalWidth;
-            let height = image.naturalHeight;
-
-            const maxDimension = 256;
-
-            if (Math.max(width, height) > maxDimension) {
-                const factor =
-                    maxDimension / Math.max(width, height);
-
-                width = Math.max(
-                    1,
-                    Math.round(width * factor)
-                );
-
-                height = Math.max(
-                    1,
-                    Math.round(height * factor)
-                );
-            }
-
-            elements.targetWidth.value = width;
-            elements.targetHeight.value = height;
-
-            updateDimensionLabels();
-
-            if (elements.imageDimensionsInfo) {
-                elements.imageDimensionsInfo.textContent =
-                    `${t("source")}: ${image.naturalWidth} × ${image.naturalHeight}`;
-            }
-
-            showLoadedImage();
-            renderImage();
-        };
-
-        image.onerror = () => {
-            URL.revokeObjectURL(imageUrl);
-            alert(t("readError"));
-        };
-
-        image.src = imageUrl;
-    }
-
-    // Unified file handler.
-    function handleFile(file) {
-        if (!file) return;
-
-        loadImageFromBlob(
-            file,
-            file.name || "pasted-image"
-        );
-    }
-
-    function handleFileList(fileList) {
-        if (!fileList || !fileList.length) return;
-
-        const imageFile = Array.from(fileList).find(
-            file =>
-                file.type &&
-                file.type.startsWith("image/")
+        const tone = Math.round(
+            clamp(gray + threshold, 0, 255) / 255 * 3
         );
 
-        if (imageFile) {
-            handleFile(imageFile);
-        } else {
-            alert(t("invalid"));
-        }
-    }
+        const shades = [15, 55, 139, 202];
 
-    // Loading an image from a direct URL.
-    function loadImageFromUrl(rawUrl) {
-        const url = String(rawUrl || "").trim();
-
-        if (!/^https?:\/\//i.test(url)) {
-            return;
-        }
-
-        const image = new Image();
-
-        image.crossOrigin = "anonymous";
-
-        image.onload = () => {
-            sourceImage = image;
-            sourceName = "image-from-url";
-
-            sourceAspect =
-                image.naturalWidth / image.naturalHeight;
-
-            let width = image.naturalWidth;
-            let height = image.naturalHeight;
-
-            const factor = Math.min(
-                1,
-                256 / Math.max(width, height)
-            );
-
-            width = Math.max(
-                1,
-                Math.round(width * factor)
-            );
-
-            height = Math.max(
-                1,
-                Math.round(height * factor)
-            );
-
-            elements.targetWidth.value = width;
-            elements.targetHeight.value = height;
-
-            updateDimensionLabels();
-
-            if (elements.imageDimensionsInfo) {
-                elements.imageDimensionsInfo.textContent =
-                    `${t("source")}: ${image.naturalWidth} × ${image.naturalHeight}`;
-            }
-
-            showLoadedImage();
-            renderImage();
-        };
-
-        image.onerror = () => {
-            alert(
-                currentLang === "ru"
-                    ? "Не удалось загрузить изображение по URL. Возможно, сайт запрещает доступ через CORS."
-                    : "Could not load the image URL. The remote site may block access through CORS."
-            );
-        };
-
-        image.src = url;
-    }
-
-    function drawSourceToCanvas(
-        targetContext,
-        width,
-        height
-    ) {
-        const mode = elements.fitMode
-            ? elements.fitMode.value
-            : "cover";
-
-        const sourceWidth = sourceImage.naturalWidth;
-        const sourceHeight = sourceImage.naturalHeight;
-
-        if (mode === "stretch") {
-            targetContext.drawImage(
-                sourceImage,
-                0,
-                0,
-                width,
-                height
-            );
-
-            return;
-        }
-
-        const scale = mode === "contain"
-            ? Math.min(
-                width / sourceWidth,
-                height / sourceHeight
-            )
-            : Math.max(
-                width / sourceWidth,
-                height / sourceHeight
-            );
-
-        const drawWidth = sourceWidth * scale;
-        const drawHeight = sourceHeight * scale;
-
-        const x = (width - drawWidth) / 2;
-        const y = (height - drawHeight) / 2;
-
-        if (mode === "contain") {
-            targetContext.clearRect(
-                0,
-                0,
-                width,
-                height
-            );
-        }
-
-        targetContext.drawImage(
-            sourceImage,
-            x,
-            y,
-            drawWidth,
-            drawHeight
-        );
-    }
-
-    function applyColorAdjustments(r, g, b) {
-        const brightness =
-            Number(elements.brightness?.value || 0) * 2.55;
-
-        const contrastValue =
-            Number(elements.contrast?.value || 0);
-
-        const contrastFactor =
-            (259 * (contrastValue + 255)) /
-            (255 * (259 - contrastValue));
-
-        r += brightness;
-        g += brightness;
-        b += brightness;
-
-        r = contrastFactor * (r - 128) + 128;
-        g = contrastFactor * (g - 128) + 128;
-        b = contrastFactor * (b - 128) + 128;
-
-        const saturation =
-            1 + Number(elements.saturation?.value || 0) / 100;
-
-        const gray =
-            0.299 * r +
-            0.587 * g +
-            0.114 * b;
-
-        r = gray + (r - gray) * saturation;
-        g = gray + (g - gray) * saturation;
-        b = gray + (b - gray) * saturation;
+        const value = shades[tone];
 
         return [
-            clamp(r, 0, 255),
-            clamp(g, 0, 255),
-            clamp(b, 0, 255)
+            value,
+            value,
+            value
         ];
     }
 
-    function quantize(value, levels) {
-        const step = 255 / (levels - 1);
+    return [
+        quantize(r, levels, threshold),
+        quantize(g, levels, threshold),
+        quantize(b, levels, threshold)
+    ];
+}
 
-        return clamp(
-            Math.round(Math.round(value / step) * step),
-            0,
-            255
-        );
+function renderImage() {
+    if (!sourceImage || isRendering) {
+        if (!sourceImage) return;
     }
 
-    // Main PSX image renderer.
-    function renderImage() {
-        if (!sourceImage) return;
+    isRendering = true;
 
-        const startTime = performance.now();
+    const requestId = ++renderRequest;
+    const startTime = performance.now();
 
-        const width = safeDimension(
-            elements.targetWidth.value,
-            128
+    try {
+        const width = clamp(
+            parseInt(el.width.value, 10) || 128,
+            1,
+            4096
         );
 
-        const height = safeDimension(
-            elements.targetHeight.value,
-            128
+        const height = clamp(
+            parseInt(el.height.value, 10) || 128,
+            1,
+            4096
         );
 
         const levels = clamp(
-            Number(elements.colorLevels?.value || 8),
+            parseInt(el.colorLevels.value, 10) || 8,
             2,
             32
         );
 
-        const ditherStrength = clamp(
-            Number(elements.ditherAmount?.value || 0),
+        const strength = clamp(
+            Number(el.dither.value),
             0,
             1
         );
 
-        const palette = elements.paletteMode
-            ? elements.paletteMode.value
-            : "rgb";
+        const tempCanvas = document.createElement("canvas");
 
-        elements.targetWidth.value = width;
-        elements.targetHeight.value = height;
+        tempCanvas.width = width;
+        tempCanvas.height = height;
 
-        elements.outputCanvas.width = width;
-        elements.outputCanvas.height = height;
+        const tempContext = tempCanvas.getContext("2d", {
+            willReadFrequently: true
+        });
 
-        const workCanvas =
-            document.createElement("canvas");
-
-        workCanvas.width = width;
-        workCanvas.height = height;
-
-        const workContext = workCanvas.getContext(
-            "2d",
-            { willReadFrequently: true }
-        );
-
-        if (!workContext) return;
-
-        workContext.clearRect(
-            0,
-            0,
-            width,
-            height
-        );
-
-        drawSourceToCanvas(
-            workContext,
-            width,
-            height
-        );
-
-        let imageData;
-
-        try {
-            imageData = workContext.getImageData(
-                0,
-                0,
-                width,
-                height
-            );
-        } catch (error) {
-            console.error(
-                "Could not read source pixels:",
-                error
-            );
-
-            alert(
-                currentLang === "ru"
-                    ? "Браузер не разрешил обработать пиксели этого изображения."
-                    : "The browser did not allow reading pixels from this image."
-            );
-
-            return;
+        if (!tempContext) {
+            throw new Error("Canvas context unavailable");
         }
+
+        tempContext.imageSmoothingEnabled = true;
+        tempContext.imageSmoothingQuality = "high";
+
+        tempContext.fillStyle = "#000000";
+        tempContext.fillRect(0, 0, width, height);
+
+        fitImage(
+            tempContext,
+            sourceImage,
+            width,
+            height,
+            el.fitMode.value
+        );
+
+        const imageData = tempContext.getImageData(
+            0, 0, width, height
+        );
 
         const pixels = imageData.data;
 
@@ -633,70 +636,21 @@
             for (let x = 0; x < width; x++) {
                 const index = (y * width + x) * 4;
 
-                const alpha = pixels[index + 3];
+                let r = pixels[index];
+                let g = pixels[index + 1];
+                let b = pixels[index + 2];
 
-                if (alpha === 0) continue;
+                [r, g, b] = adjustColor(r, g, b);
 
-                let [r, g, b] =
-                    applyColorAdjustments(
-                        pixels[index],
-                        pixels[index + 1],
-                        pixels[index + 2]
-                    );
-
-                // Bayer 8x8 dithering.
-                if (ditherStrength > 0) {
-                    const threshold =
-                        (
-                            bayerMatrix8x8[y & 7][x & 7] / 64 -
-                            0.5
-                        ) *
-                        64 *
-                        ditherStrength;
-
-                    r = clamp(r + threshold, 0, 255);
-                    g = clamp(g + threshold, 0, 255);
-                    b = clamp(b + threshold, 0, 255);
-                }
-
-                if (palette === "grayscale") {
-                    const gray =
-                        0.299 * r +
-                        0.587 * g +
-                        0.114 * b;
-
-                    const value = quantize(
-                        gray,
-                        levels
-                    );
-
-                    r = g = b = value;
-
-                } else if (palette === "gameboy") {
-                    const gray =
-                        0.299 * r +
-                        0.587 * g +
-                        0.114 * b;
-
-                    const tone = Math.round(
-                        gray / 255 * 3
-                    );
-
-                    const gameBoyPalette = [
-                        15,
-                        65,
-                        139,
-                        199
-                    ];
-
-                    r = g = b =
-                        gameBoyPalette[tone];
-
-                } else {
-                    r = quantize(r, levels);
-                    g = quantize(g, levels);
-                    b = quantize(b, levels);
-                }
+                [r, g, b] = applyPalette(
+                    r,
+                    g,
+                    b,
+                    x,
+                    y,
+                    levels,
+                    strength
+                );
 
                 pixels[index] = r;
                 pixels[index + 1] = g;
@@ -704,533 +658,299 @@
             }
         }
 
+        if (requestId !== renderRequest) return;
+
+        el.preview.width = width;
+        el.preview.height = height;
+
         ctx.putImageData(imageData, 0, 0);
 
-        showLoadedImage();
-        updateCanvasScale();
-        updateDimensionLabels();
-        updateValueLabels();
+        el.outputInfo.textContent =
+            `${tr("outputLabel")} ${width} × ${height}`;
 
-        if (elements.outputDimensionsInfo) {
-            elements.outputDimensionsInfo.textContent =
-                `${t("output")}: ${width} × ${height}`;
-        }
+        el.renderTime.textContent =
+            `Render time: ${(performance.now() - startTime).toFixed(1)} ms`;
 
-        if (elements.renderTime) {
-            elements.renderTime.textContent =
-                `${t("render")}: ${(performance.now() - startTime).toFixed(1)} ms`;
+        updatePreviewScale();
+
+        showPreview();
+
+    } catch (error) {
+        console.error("Rendering error:", error);
+    } finally {
+        isRendering = false;
+    }
+}
+
+/* =========================================================
+   DIMENSION CONTROLS
+   ========================================================= */
+
+function updateDimensionLabels() {
+    el.widthVal.textContent = `${el.width.value}px`;
+    el.heightVal.textContent = `${el.height.value}px`;
+}
+
+function changeDimension(input, amount) {
+    input.value = clamp(
+        Number(input.value) + amount,
+        1,
+        4096
+    );
+
+    if (aspectLocked && sourceWidth && sourceHeight) {
+        if (input === el.width) {
+            el.height.value = Math.max(
+                1,
+                Math.round(input.value * sourceHeight / sourceWidth)
+            );
+        } else {
+            el.width.value = Math.max(
+                1,
+                Math.round(input.value * sourceWidth / sourceHeight)
+            );
         }
     }
 
-    function scheduleRender() {
-        if (!sourceImage || renderQueued) return;
-
-        renderQueued = true;
-
-        requestAnimationFrame(() => {
-            renderQueued = false;
-            renderImage();
-        });
-    }
-
-    // PNG export.
-    function downloadImage() {
-        if (!sourceImage) return;
-
-        elements.outputCanvas.toBlob((blob) => {
-            if (!blob) {
-                alert(
-                    currentLang === "ru"
-                        ? "Не удалось экспортировать PNG."
-                        : "Could not export the PNG image."
-                );
-
-                return;
-            }
-
-            const url = URL.createObjectURL(blob);
-
-            const link =
-                document.createElement("a");
-
-            link.href = url;
-
-            link.download =
-                `psx-${sourceName}-${elements.outputCanvas.width}x${elements.outputCanvas.height}.png`;
-
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-
-            setTimeout(
-                () => URL.revokeObjectURL(url),
-                1000
-            );
-
-        }, "image/png");
-    }
-
-    function changeDimension(input, delta) {
-        input.value = safeDimension(
-            Number(input.value) + delta,
-            128
-        );
-
-        if (lockAspect && sourceAspect > 0) {
-            if (input === elements.targetWidth) {
-                elements.targetHeight.value =
-                    safeDimension(
-                        Math.round(
-                            Number(input.value) / sourceAspect
-                        ),
-                        128
-                    );
-            } else {
-                elements.targetWidth.value =
-                    safeDimension(
-                        Math.round(
-                            Number(input.value) * sourceAspect
-                        ),
-                        128
-                    );
-            }
-        }
-
-        updateDimensionLabels();
-        scheduleRender();
-    }
-
-    function resetSettings() {
-        elements.targetWidth.value = defaults.width;
-        elements.targetHeight.value = defaults.height;
-
-        if (elements.fitMode) {
-            elements.fitMode.value = defaults.fitMode;
-        }
-
-        if (elements.ditherAmount) {
-            elements.ditherAmount.value =
-                defaults.ditherAmount;
-        }
-
-        if (elements.colorLevels) {
-            elements.colorLevels.value =
-                defaults.colorLevels;
-        }
-
-        if (elements.paletteMode) {
-            elements.paletteMode.value =
-                defaults.paletteMode;
-        }
-
-        if (elements.brightness) {
-            elements.brightness.value =
-                defaults.brightness;
-        }
-
-        if (elements.contrast) {
-            elements.contrast.value =
-                defaults.contrast;
-        }
-
-        if (elements.saturation) {
-            elements.saturation.value =
-                defaults.saturation;
-        }
-
-        if (elements.previewScale) {
-            elements.previewScale.value =
-                defaults.previewScale;
-        }
-
-        lockAspect = false;
-
-        updateAspectButton();
-        updateDimensionLabels();
-        updateValueLabels();
-
-        if (sourceImage) {
-            renderImage();
-        }
-    }
-
-    // -----------------------------------------
-    // FILE PICKER
-    // -----------------------------------------
-
-    elements.dropZone.addEventListener(
-        "click",
-        (event) => {
-            if (event.target === elements.fileInput) {
-                return;
-            }
-
-            elements.fileInput.click();
-        }
-    );
-
-    elements.fileInput.accept = "image/*";
-
-    elements.fileInput.addEventListener(
-        "change",
-        (event) => {
-            handleFileList(event.target.files);
-
-            // Allows selecting the same file again.
-            event.target.value = "";
-        }
-    );
-
-    // -----------------------------------------
-    // DRAG AND DROP
-    // -----------------------------------------
-
-    ["dragenter", "dragover"].forEach(
-        (eventName) => {
-            elements.dropZone.addEventListener(
-                eventName,
-                (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-
-                    elements.dropZone.classList.add(
-                        "border-indigo-500",
-                        "drag-active"
-                    );
-
-                    if (event.dataTransfer) {
-                        event.dataTransfer.dropEffect = "copy";
-                    }
-                }
-            );
-        }
-    );
-
-    ["dragleave", "dragend"].forEach(
-        (eventName) => {
-            elements.dropZone.addEventListener(
-                eventName,
-                (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-
-                    elements.dropZone.classList.remove(
-                        "border-indigo-500",
-                        "drag-active"
-                    );
-                }
-            );
-        }
-    );
-
-    elements.dropZone.addEventListener(
-        "drop",
-        (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-
-            elements.dropZone.classList.remove(
-                "border-indigo-500",
-                "drag-active"
-            );
-
-            handleFileList(
-                event.dataTransfer &&
-                event.dataTransfer.files
-            );
-        }
-    );
-
-    // Prevent browser from opening dropped files.
-    window.addEventListener(
-        "dragover",
-        (event) => {
-            event.preventDefault();
-        }
-    );
-
-    window.addEventListener(
-        "drop",
-        (event) => {
-            event.preventDefault();
-
-            if (
-                event.target !== elements.dropZone &&
-                !elements.dropZone.contains(event.target)
-            ) {
-                handleFileList(
-                    event.dataTransfer &&
-                    event.dataTransfer.files
-                );
-            }
-        }
-    );
-
-    // -----------------------------------------
-    // CLIPBOARD (CTRL + V)
-    // -----------------------------------------
-
-    window.addEventListener(
-        "paste",
-        (event) => {
-            const clipboard = event.clipboardData;
-
-            if (!clipboard) return;
-
-            const items = Array.from(
-                clipboard.items || []
-            );
-
-            const imageItem = items.find(
-                (item) =>
-                    item.kind === "file" &&
-                    item.type.startsWith("image/")
-            );
-
-            if (imageItem) {
-                const imageFile =
-                    imageItem.getAsFile();
-
-                if (imageFile) {
-                    event.preventDefault();
-                    handleFile(imageFile);
-                    return;
-                }
-            }
-
-            // Also accept a direct image URL copied as text.
-            const text = clipboard
-                .getData("text/plain")
-                .trim();
-
-            if (/^https?:\/\/\S+$/i.test(text)) {
-                event.preventDefault();
-                loadImageFromUrl(text);
-            }
-        }
-    );
-
-    // -----------------------------------------
-    // RESOLUTION CONTROLS
-    // -----------------------------------------
-
-    elements.targetWidth.addEventListener(
-        "input",
-        () => {
-            if (lockAspect && sourceAspect > 0) {
-                elements.targetHeight.value =
-                    safeDimension(
-                        Math.round(
-                            Number(elements.targetWidth.value) /
-                            sourceAspect
-                        ),
-                        128
-                    );
-            }
-
-            updateDimensionLabels();
-            scheduleRender();
-        }
-    );
-
-    elements.targetHeight.addEventListener(
-        "input",
-        () => {
-            if (lockAspect && sourceAspect > 0) {
-                elements.targetWidth.value =
-                    safeDimension(
-                        Math.round(
-                            Number(elements.targetHeight.value) *
-                            sourceAspect
-                        ),
-                        128
-                    );
-            }
-
-            updateDimensionLabels();
-            scheduleRender();
-        }
-    );
-
-    const dimensionButtons = [
-        ["wSub10", elements.targetWidth, -10],
-        ["wSub1", elements.targetWidth, -1],
-        ["wAdd1", elements.targetWidth, 1],
-        ["wAdd10", elements.targetWidth, 10],
-
-        ["hSub10", elements.targetHeight, -10],
-        ["hSub1", elements.targetHeight, -1],
-        ["hAdd1", elements.targetHeight, 1],
-        ["hAdd10", elements.targetHeight, 10]
-    ];
-
-    dimensionButtons.forEach(
-        ([id, input, delta]) => {
-            const button = $(id);
-
-            if (button) {
-                button.addEventListener(
-                    "click",
-                    () => changeDimension(input, delta)
-                );
-            }
-        }
-    );
-
-    // Resolution presets.
-    document.querySelectorAll(
-        ".preset-btn"
-    ).forEach((button) => {
-        button.addEventListener(
-            "click",
-            () => {
-                elements.targetWidth.value =
-                    safeDimension(button.dataset.w, 128);
-
-                elements.targetHeight.value =
-                    safeDimension(button.dataset.h, 128);
-
-                updateDimensionLabels();
-                scheduleRender();
-            }
-        );
-    });
-
-    // Aspect ratio lock.
-    if (elements.lockAspectBtn) {
-        elements.lockAspectBtn.addEventListener(
-            "click",
-            () => {
-                lockAspect = !lockAspect;
-
-                if (lockAspect && sourceAspect > 0) {
-                    elements.targetHeight.value =
-                        safeDimension(
-                            Math.round(
-                                Number(elements.targetWidth.value) /
-                                sourceAspect
-                            ),
-                            128
-                        );
-                }
-
-                updateAspectButton();
-                updateDimensionLabels();
-                scheduleRender();
-            }
-        );
-    }
-
-    // -----------------------------------------
-    // IMAGE PROCESSING CONTROLS
-    // -----------------------------------------
-
-    [
-        elements.fitMode,
-        elements.ditherAmount,
-        elements.colorLevels,
-        elements.paletteMode,
-        elements.brightness,
-        elements.contrast,
-        elements.saturation
-    ]
-        .filter(Boolean)
-        .forEach((control) => {
-            control.addEventListener(
-                "input",
-                () => {
-                    updateValueLabels();
-                    scheduleRender();
-                }
-            );
-
-            control.addEventListener(
-                "change",
-                () => {
-                    updateValueLabels();
-                    scheduleRender();
-                }
-            );
-        });
-
-    // Preview zoom.
-    if (elements.previewScale) {
-        elements.previewScale.addEventListener(
-            "change",
-            updateCanvasScale
-        );
-    }
-
-    // -----------------------------------------
-    // BUTTONS
-    // -----------------------------------------
-
-    elements.headerDownloadBtn.addEventListener(
-        "click",
-        downloadImage
-    );
-
-    elements.toolbarDownloadBtn.addEventListener(
-        "click",
-        downloadImage
-    );
-
-    if (elements.resetBtn) {
-        elements.resetBtn.addEventListener(
-            "click",
-            resetSettings
-        );
-    }
-
-    // -----------------------------------------
-    // LANGUAGE
-    // -----------------------------------------
-
-    if (elements.languageSelect) {
-        elements.languageSelect.addEventListener(
-            "change",
-            () => {
-                currentLang =
-                    elements.languageSelect.value === "ru"
-                        ? "ru"
-                        : "en";
-
-                updateAspectButton();
-
-                if (!sourceImage) {
-                    setStatus(t("drop"));
-                }
-
-                if (
-                    elements.imageDimensionsInfo &&
-                    sourceImage
-                ) {
-                    elements.imageDimensionsInfo.textContent =
-                        `${t("source")}: ${sourceImage.naturalWidth} × ${sourceImage.naturalHeight}`;
-                }
-
-                if (
-                    elements.outputDimensionsInfo &&
-                    sourceImage
-                ) {
-                    elements.outputDimensionsInfo.textContent =
-                        `${t("output")}: ${elements.outputCanvas.width} × ${elements.outputCanvas.height}`;
-                }
-            }
-        );
-    }
-
-    // -----------------------------------------
-    // INITIALIZATION
-    // -----------------------------------------
-
-    elements.fileInput.value = "";
-
-    showEmptyState();
     updateDimensionLabels();
-    updateValueLabels();
+    renderImage();
+}
+
+el.width.addEventListener("input", () => {
+    if (aspectLocked && sourceWidth && sourceHeight) {
+        el.height.value = Math.max(
+            1,
+            Math.round(el.width.value * sourceHeight / sourceWidth)
+        );
+    }
+
+    updateDimensionLabels();
+    renderImage();
+});
+
+el.height.addEventListener("input", () => {
+    if (aspectLocked && sourceWidth && sourceHeight) {
+        el.width.value = Math.max(
+            1,
+            Math.round(el.height.value * sourceWidth / sourceHeight)
+        );
+    }
+
+    updateDimensionLabels();
+    renderImage();
+});
+
+[
+    ["wSub10", el.width, -10],
+    ["wSub1", el.width, -1],
+    ["wAdd1", el.width, 1],
+    ["wAdd10", el.width, 10],
+
+    ["hSub10", el.height, -10],
+    ["hSub1", el.height, -1],
+    ["hAdd1", el.height, 1],
+    ["hAdd10", el.height, 10]
+].forEach(([id, input, amount]) => {
+    $(id).addEventListener("click", () => {
+        changeDimension(input, amount);
+    });
+});
+
+/* =========================================================
+   PRESETS
+   ========================================================= */
+
+document.querySelectorAll(".preset-btn").forEach(button => {
+    button.addEventListener("click", () => {
+        el.width.value = button.dataset.w;
+        el.height.value = button.dataset.h;
+
+        updateDimensionLabels();
+        renderImage();
+    });
+});
+
+/* =========================================================
+   ASPECT RATIO
+   ========================================================= */
+
+function updateAspectButton() {
+    el.lockIcon.className = aspectLocked
+        ? "fa-solid fa-lock text-indigo-400"
+        : "fa-solid fa-lock-open text-gray-500";
+
+    el.lockAspect.title = aspectLocked
+        ? tr("locked")
+        : tr("unlocked");
+}
+
+el.lockAspect.addEventListener("click", () => {
+    aspectLocked = !aspectLocked;
+
+    if (aspectLocked && sourceWidth && sourceHeight) {
+        el.height.value = Math.max(
+            1,
+            Math.round(el.width.value * sourceHeight / sourceWidth)
+        );
+
+        updateDimensionLabels();
+        renderImage();
+    }
+
+    updateAspectButton();
+});
+
+/* =========================================================
+   SETTINGS
+   ========================================================= */
+
+function bindSetting(input, output, format = value => value) {
+    input.addEventListener("input", () => {
+        output.textContent = format(input.value);
+        renderImage();
+    });
+}
+
+bindSetting(el.dither, el.ditherVal, value =>
+    Number(value).toFixed(2)
+);
+
+bindSetting(el.colorLevels, el.colorLevelsVal, value => {
+    return `${value} (${Math.pow(Number(value), 3)} colors)`;
+});
+
+bindSetting(el.brightness, el.brightnessVal);
+bindSetting(el.contrast, el.contrastVal);
+bindSetting(el.saturation, el.saturationVal);
+
+el.palette.addEventListener("change", renderImage);
+el.fitMode.addEventListener("change", renderImage);
+
+/* =========================================================
+   PREVIEW ZOOM
+   ========================================================= */
+
+function updatePreviewScale() {
+    if (!sourceImage) return;
+
+    const scale = el.previewScale.value;
+
+    if (scale === "fit") {
+        el.preview.style.width = "auto";
+        el.preview.style.height = "auto";
+        el.preview.style.maxWidth = "100%";
+        el.preview.style.maxHeight = "100%";
+        return;
+    }
+
+    const multiplier = Number(scale);
+
+    el.preview.style.width = `${el.preview.width * multiplier}px`;
+    el.preview.style.height = `${el.preview.height * multiplier}px`;
+
+    el.preview.style.maxWidth = "none";
+    el.preview.style.maxHeight = "none";
+}
+
+el.previewScale.addEventListener("change", updatePreviewScale);
+
+/* =========================================================
+   EXPORT PNG
+   ========================================================= */
+
+function downloadImage() {
+    if (!sourceImage || !el.preview.width) return;
+
+    el.preview.toBlob(blob => {
+        if (!blob) {
+            alert("PNG export failed.");
+            return;
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+
+        link.href = url;
+        link.download =
+            `psx-${sourceName}-${el.preview.width}x${el.preview.height}.png`;
+
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, "image/png");
+}
+
+el.downloadHeader.addEventListener("click", downloadImage);
+el.downloadToolbar.addEventListener("click", downloadImage);
+
+/* =========================================================
+   RESET
+   ========================================================= */
+
+el.reset.addEventListener("click", () => {
+    el.width.value = 128;
+    el.height.value = 128;
+
+    el.dither.value = 0.8;
+    el.colorLevels.value = 8;
+
+    el.brightness.value = 0;
+    el.contrast.value = 0;
+    el.saturation.value = 0;
+
+    el.palette.value = "rgb";
+    el.fitMode.value = "cover";
+    el.previewScale.value = "3";
+
+    aspectLocked = false;
+
+    el.ditherVal.textContent = "0.80";
+    el.colorLevelsVal.textContent = "8 (512 colors)";
+
+    el.brightnessVal.textContent = "0";
+    el.contrastVal.textContent = "0";
+    el.saturationVal.textContent = "0";
+
+    updateDimensionLabels();
     updateAspectButton();
 
-    setStatus(t("drop"));
+    renderImage();
+});
 
-})();
+/* =========================================================
+   LANGUAGE
+   ========================================================= */
+
+el.language.addEventListener("change", () => {
+    applyLanguage();
+
+    if (sourceImage) {
+        renderImage();
+    }
+});
+
+/* =========================================================
+   INITIALIZATION
+   ========================================================= */
+
+function initialize() {
+    applyLanguage();
+
+    updateDimensionLabels();
+    updateAspectButton();
+
+    el.ditherVal.textContent = "0.80";
+    el.colorLevelsVal.textContent = "8 (512 colors)";
+
+    el.brightnessVal.textContent = "0";
+    el.contrastVal.textContent = "0";
+    el.saturationVal.textContent = "0";
+
+    showPlaceholder();
+
+    console.log("PSX Texture Studio initialized.");
+}
+
+initialize();
