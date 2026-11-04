@@ -1,4 +1,3 @@
-
 "use strict";
 
 /* =========================================================
@@ -191,6 +190,22 @@ function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
 
+
+/* Non-blocking status message (replaces alert popups) */
+function showStatus(text, isError = false) {
+    const el = $("i18n-placeholder");
+    if (el) {
+        el.textContent = text;
+        el.classList.toggle("text-red-400", isError);
+    }
+    ui.placeholder.classList.remove("hidden");
+}
+
+function clearStatusError() {
+    const el = $("i18n-placeholder");
+    if (el) el.classList.remove("text-red-400");
+}
+
 function getText(key) {
     return translations[currentLanguage][key] ||
         translations.en[key] ||
@@ -277,28 +292,12 @@ function isImageFile(file) {
  * This avoids relying on FileReader alone.
  */
 
-function decodeImageFile(file) {
-    return new Promise(async (resolve, reject) => {
-        if (typeof createImageBitmap === "function") {
-            try {
-                const bitmap = await createImageBitmap(file);
-
-                if (bitmap.width > 0 && bitmap.height > 0) {
-                    resolve(bitmap);
-                    return;
-                }
-
-                bitmap.close();
-            } catch (error) {
-                console.warn("createImageBitmap failed:", error);
-            }
-        }
-
-        const objectURL = URL.createObjectURL(file);
+function loadViaImageElement(src, revoke) {
+    return new Promise((resolve, reject) => {
         const image = new Image();
 
         image.onload = () => {
-            URL.revokeObjectURL(objectURL);
+            if (revoke) URL.revokeObjectURL(src);
 
             if (image.naturalWidth > 0 && image.naturalHeight > 0) {
                 resolve(image);
@@ -308,12 +307,66 @@ function decodeImageFile(file) {
         };
 
         image.onerror = () => {
-            URL.revokeObjectURL(objectURL);
+            if (revoke) URL.revokeObjectURL(src);
             reject(new Error("Browser image decoder rejected this file."));
         };
 
-        image.src = objectURL;
+        image.src = src;
     });
+}
+
+function readAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error("File read failed."));
+        reader.readAsDataURL(file);
+    });
+}
+
+async function decodeImageFile(file) {
+    const errors = [];
+
+    /* 1. createImageBitmap, default options */
+    if (typeof createImageBitmap === "function") {
+        try {
+            const bitmap = await createImageBitmap(file);
+            if (bitmap.width > 0 && bitmap.height > 0) return bitmap;
+            bitmap.close();
+        } catch (error) {
+            errors.push("bitmap: " + error.message);
+        }
+
+        /* 2. createImageBitmap without colour-space conversion */
+        try {
+            const bitmap = await createImageBitmap(file, {
+                colorSpaceConversion: "none",
+                premultiplyAlpha: "none"
+            });
+            if (bitmap.width > 0 && bitmap.height > 0) return bitmap;
+            bitmap.close();
+        } catch (error) {
+            errors.push("bitmap-raw: " + error.message);
+        }
+    }
+
+    /* 3. <img> + object URL */
+    try {
+        return await loadViaImageElement(URL.createObjectURL(file), true);
+    } catch (error) {
+        errors.push("img-url: " + error.message);
+    }
+
+    /* 4. <img> + data URL */
+    try {
+        return await loadViaImageElement(await readAsDataURL(file), false);
+    } catch (error) {
+        errors.push("img-data: " + error.message);
+    }
+
+    const failure = new Error(errors.join(" | "));
+    failure.details = errors;
+    throw failure;
 }
 
 /* =========================================================
@@ -324,7 +377,7 @@ async function handleFile(file) {
     if (!file) return;
 
     if (!isImageFile(file)) {
-        alert(getText("unsupported"));
+        showStatus(getText("unsupported"), true);
         return;
     }
 
@@ -335,7 +388,8 @@ async function handleFile(file) {
     ui.placeholder.classList.remove("hidden");
     ui.preview.classList.add("hidden");
 
-    $("i18n-placeholder").textContent = getText("loading");
+    clearStatusError();
+    showStatus(getText("loading"));
 
     try {
         const decoded = await decodeImageFile(file);
@@ -389,16 +443,13 @@ async function handleFile(file) {
             ui.preview.classList.add("hidden");
             ui.placeholder.classList.remove("hidden");
 
-            $("i18n-placeholder").textContent = getText("placeholder");
-
             ui.downloadHeader.disabled = true;
             ui.downloadToolbar.disabled = true;
 
-            alert(
-                `${getText("readError")}\n\n` +
-                `File: ${file.name || "unknown"}\n` +
-                `Type: ${file.type || "unknown"}\n` +
-                `Size: ${file.size} bytes`
+            showStatus(
+                `${getText("readError")} ` +
+                `(${file.name || "unknown"}, ${(file.size / 1048576).toFixed(1)} MB)`,
+                true
             );
         }
     } finally {
@@ -504,7 +555,7 @@ window.addEventListener("drop", event => {
         if (imageFile) {
             handleFile(imageFile);
         } else {
-            alert(getText("unsupported"));
+            showStatus(getText("unsupported"), true);
         }
 
         return;
@@ -589,9 +640,10 @@ function loadFromURL(url) {
     };
 
     image.onerror = () => {
-        alert(
+        showStatus(
             "Could not load this image URL. " +
-            "The remote server may block access through CORS."
+            "The remote server may block access through CORS.",
+            true
         );
     };
 
@@ -836,7 +888,7 @@ function renderImage() {
 
     } catch (error) {
         console.error("Render error:", error);
-        alert(`${getText("renderError")}\n${error.message}`);
+        showStatus(`${getText("renderError")} ${error.message}`, true);
     }
 }
 
@@ -1044,13 +1096,13 @@ ui.previewScale.addEventListener("change", updatePreviewScale);
 
 function downloadImage() {
     if (!sourceImage) {
-        alert(getText("noImage"));
+        showStatus(getText("noImage"), true);
         return;
     }
 
     ui.preview.toBlob(blob => {
         if (!blob) {
-            alert("PNG export failed.");
+            showStatus("PNG export failed.", true);
             return;
         }
 
