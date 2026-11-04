@@ -233,3 +233,20 @@ canvas {
     font-weight: 600;
     margin-top: 4px;
 }
+/* ---------------------------------------------------------
+   Fallback if the Tailwind CDN fails to load (offline, VPN,
+   ad-blocker, corporate network). Without it, the "hidden"
+   class does nothing: the file input and the empty canvas
+   become visible and the UI breaks.
+   --------------------------------------------------------- */
+.hidden {
+    display: none !important;
+}
+
+#fileInput {
+    display: none !important;
+}
+
+#dropZone {
+    cursor: pointer;
+}
